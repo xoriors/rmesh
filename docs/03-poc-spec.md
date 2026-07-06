@@ -1,4 +1,4 @@
-# Telescale POC — Data Spec
+# rmesh POC — Data Spec
 
 Concrete schemas for the POC. Encoding is **canonical CBOR** (serde +
 `ciborium`, deterministic map ordering) — everything signed must have a
@@ -22,7 +22,7 @@ type Nonce     = [u8; 24];
 
 Every signed struct follows the same pattern: the signature covers
 `canonical_cbor(struct with sig field omitted)` prefixed by a domain
-separator, e.g. `b"telescale/roster/v1"`. Domain separators prevent
+separator, e.g. `b"rmesh/roster/v1"`. Domain separators prevent
 cross-context signature reuse.
 
 ## DHT record layout
@@ -167,7 +167,7 @@ struct Invite {
 }
 ```
 
-Wire form: `telescale://invite/` + base64url(canonical CBOR). Admin keeps
+Wire form: `rmesh://invite/` + base64url(canonical CBOR). Admin keeps
 a local table of unredeemed nonces; redemption consumes the nonce.
 
 ## RPC envelopes (AppCall / AppMessage)

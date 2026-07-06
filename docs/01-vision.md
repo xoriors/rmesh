@@ -1,8 +1,8 @@
-# Telescale — Vision
+# rmesh — Vision
 
 ## One-liner
 
-**Telescale is a decentralized private network layer: Tailscale-like groups of
+**rmesh is a decentralized private network layer: Tailscale-like groups of
 people and devices, with no coordination server, no accounts, and no company
 in the middle.**
 
@@ -16,7 +16,7 @@ directory, distributes keys, evaluates ACLs, and can (in principle) remove or
 add members of your network. The data plane is end-to-end encrypted, but the
 *membership and policy plane* is not yours.
 
-Telescale asks: what does the same experience look like when the coordination
+rmesh asks: what does the same experience look like when the coordination
 plane is **also** decentralized?
 
 - **Membership** is a signed data structure replicated over a public DHT — not
@@ -32,7 +32,7 @@ plane is **also** decentralized?
 ## Why Veilid
 
 Building the substrate — DHT, NAT traversal, relaying, onion-style private
-routing, transport encryption — is years of work and not where Telescale's
+routing, transport encryption — is years of work and not where rmesh's
 value is. [Veilid](https://veilid.com) already provides exactly this layer,
 open source and in Rust:
 
@@ -46,7 +46,7 @@ open source and in Rust:
 | NAT traversal, relays, bootstrap | Built into veilid-core; public bootstrap or self-hosted |
 | Local encrypted storage | TableStore / ProtectedStore |
 
-Telescale is therefore an **application-layer protocol on top of Veilid**:
+rmesh is therefore an **application-layer protocol on top of Veilid**:
 groups, invitations, membership, sync, and ACLs — the things Veilid
 deliberately does not opine on.
 
@@ -86,7 +86,7 @@ membership/sync/ACL core is proven.
    signed and validated against the membership state at that version. A
    malicious relay or DHT node can withhold data, but never forge it.
 4. **E2EE above the transport.** Veilid encrypts transport and DHT records;
-   Telescale additionally encrypts group content with a group data key known
+   rmesh additionally encrypts group content with a group data key known
    only to current members, rotated on membership change.
 5. **Small trusted computing base.** The POC's security-critical surface is
    the schema definitions and validation logic — kept in one crate,
@@ -94,6 +94,7 @@ membership/sync/ACL core is proven.
 
 ## Naming
 
-- **Telescale** — the project / protocol layer.
-- **rmesh** — this repository and the POC node/CLI binary.
-- **Veilid** — the underlying P2P network (external project, unaffiliated).
+- **rmesh** — the project: the protocol layer, this repository, and the POC
+  node/CLI binary.
+- **Veilid** — the underlying P2P network library (external project,
+  unaffiliated).

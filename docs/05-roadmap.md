@@ -1,4 +1,4 @@
-# Telescale — Roadmap
+# rmesh — Roadmap
 
 Phases are ordered so that every phase ends in something runnable and
 demoable. Security-critical logic (proto/core) is built and tested before the
@@ -8,8 +8,8 @@ network is involved.
 
 **Goal: a node that attaches to Veilid; workspace skeleton in place.**
 
-- [ ] Cargo workspace: `telescale-proto`, `telescale-core`,
-      `telescale-veilid`, `rmesh-cli`.
+- [ ] Cargo workspace: `rmesh-proto`, `rmesh-core`,
+      `rmesh-veilid`, `rmesh-cli`.
 - [ ] Pin veilid-core; minimal node: init, attach, report network state
       (`rmesh node status`).
 - [ ] Identity: generate/load member keypair (ProtectedStore),
@@ -22,10 +22,10 @@ network is involved.
 
 **Goal: create a group and read it back — schemas proven on the real DHT.**
 
-- [ ] `telescale-proto`: all `03-poc-spec.md` structs, canonical CBOR,
+- [ ] `rmesh-proto`: all `03-poc-spec.md` structs, canonical CBOR,
       domain-separated sign/verify. Property tests: encode/decode roundtrip,
       signature tamper detection.
-- [ ] `telescale-veilid`: DHT record create/read/write wrappers.
+- [ ] `rmesh-veilid`: DHT record create/read/write wrappers.
 - [ ] `rmesh group create <name>`, `rmesh group show` (fetch + verify from
       DHT, even for our own group — validation path exercised from day one).
 
@@ -37,7 +37,7 @@ restart (state from TableStore + DHT).
 **Goal: two real machines, one group.**
 
 - [ ] Invite mint/encode/parse (`rmesh invite create --role member --ttl 24h`).
-- [ ] Private routes + AppCall plumbing in `telescale-veilid`.
+- [ ] Private routes + AppCall plumbing in `rmesh-veilid`.
 - [ ] JoinRequest/Accept/Reject state machine (admin side + invitee side).
 - [ ] Roster v+1 publish, KeyWrapSet publish, invitee verify-and-unwrap.
 - [ ] Negative tests: expired invite, replayed nonce, tampered invite,
@@ -51,7 +51,7 @@ agrees on both.
 **Goal: the "explicit sync for updates" pillar, end to end.**
 
 - [ ] Outbox writer: seq, hash chain, encryption, ring buffer.
-- [ ] Validation pipeline exactly per spec (pure, in `telescale-core`,
+- [ ] Validation pipeline exactly per spec (pure, in `rmesh-core`,
       fuzz/property tested with an in-memory fake network).
 - [ ] DHT watch path + version vectors + pending queue.
 - [ ] Direct reconcile (SyncRequest/Response) + Poke nudges.
@@ -91,7 +91,7 @@ can't read new ones.
 a group, invite, chat, sync a kv doc, revoke a member — with no
 infrastructure of ours running anywhere.
 
-## Post-POC — toward Telescale proper
+## Post-POC — toward rmesh proper
 
 Not scheduled; recorded so POC decisions don't paint us out of them.
 
@@ -102,10 +102,10 @@ Not scheduled; recorded so POC decisions don't paint us out of them.
 3. **Large payloads / files** — chunking + content-addressed blocks
    (Veilid block store when available), maybe rencfs-style encrypted trees.
 4. **Overlay IP mode** — the Tailscale-shaped feature: TUN device, group
-   members get stable overlay addresses, ACLs become packet policy. This is
-   where "Telescale" earns its name; the membership/ACL/sync core built in
-   the POC is exactly the control plane it needs.
-5. **Mobile** — veilid-flutter bindings over `telescale-core`.
+   members get stable overlay addresses, ACLs become packet policy. The
+   membership/ACL/sync core built in the POC is exactly the control plane
+   it needs.
+5. **Mobile** — veilid-flutter bindings over `rmesh-core`.
 6. **Private Veilid subnet option** — self-hosted bootstrap for fully
    air-gapped deployments.
 7. **Stronger crypto lifecycle** — per-sender ratchets / MLS-style tree keys

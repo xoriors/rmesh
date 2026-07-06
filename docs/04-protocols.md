@@ -1,4 +1,4 @@
-# Telescale POC — Protocol Flows
+# rmesh POC — Protocol Flows
 
 Message and record schemas are in `03-poc-spec.md`. All flows below run over
 Veilid: DHT operations for shared state, AppCall/AppMessage over private
@@ -29,7 +29,7 @@ sequenceDiagram
     participant I as Invitee
     participant D as Veilid DHT
     A->>A: mint Invite {nonce, expiry, role, admin_route}, sign
-    A-->>I: out-of-band: telescale://invite/… (link / QR)
+    A-->>I: out-of-band: rmesh://invite/… (link / QR)
     I->>I: generate identity + dh keypairs
     I->>D: create own outbox record
     I->>A: AppCall JoinRequest {invite, member, dh_pub, outbox}
