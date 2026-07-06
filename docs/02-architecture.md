@@ -1,130 +1,179 @@
 # rmesh — Architecture
 
-This document describes the system architecture of the rmesh POC on
-Veilid. Data schemas live in `03-poc-spec.md`; protocol flows in
+System architecture of the rmesh POC on Veilid. Decisions behind it:
+`00-brainstorm-decisions.md`. Data schemas: `03-poc-spec.md`. Protocol flows:
 `04-protocols.md`.
 
 ## Layer model
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Apps (POC: CLI chat / kv-doc demo)                     │
-├─────────────────────────────────────────────────────────┤
-│  rmesh layer (this project)                             │
-│  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌──────────────┐  │
-│  │ Identity │ │ Groups & │ │  Sync  │ │ Routing +    │  │
-│  │          │ │ Invites  │ │ Engine │ │ ACL          │  │
-│  └──────────┘ └──────────┘ └────────┘ └──────────────┘  │
-├─────────────────────────────────────────────────────────┤
-│  Veilid (veilid-core)                                   │
-│  DHT records · private routes · AppCall/AppMessage ·    │
-│  crypto (VLD0) · NAT traversal · relays · bootstrap     │
-├─────────────────────────────────────────────────────────┤
-│  Internet (UDP / TCP / WebSocket)                       │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│  Local apps (psql, ssh, curl … anything TCP)             │
+├──────────────────────────────────────────────────────────┤
+│  rmesh daemon (this project)                             │
+│  ┌──────────┐ ┌──────────┐ ┌────────────┐ ┌───────────┐  │
+│  │ Identity │ │ Groups & │ │ Membership │ │ Routing + │  │
+│  │          │ │ Invites  │ │ Sync       │ │ ACL       │  │
+│  └──────────┘ └──────────┘ └────────────┘ └───────────┘  │
+│  ┌────────────────────────────────────────────────────┐  │
+│  │ Data plane: port-forward tunnels (SSH-forward-like)│  │
+│  └────────────────────────────────────────────────────┘  │
+├──────────────────────────────────────────────────────────┤
+│  Transport adapter (narrow trait — swappable)            │
+├──────────────────────────────────────────────────────────┤
+│  Veilid (veilid-core)          [future option: Iroh]     │
+│  DHT records · private routes · AppCall/AppMessage ·     │
+│  crypto (VLD0) · NAT traversal · relays · bootstrap      │
+├──────────────────────────────────────────────────────────┤
+│  Internet (UDP / TCP / WebSocket)                        │
+└──────────────────────────────────────────────────────────┘
 ```
 
-rmesh never talks to sockets directly; everything below the rmesh
-layer is Veilid's job. Conversely, Veilid knows nothing about groups, members,
-or ACLs.
+The daemon never touches sockets for mesh traffic — that's the transport's
+job. The **only** crate that imports veilid-core is the adapter; everything
+above it programs against a small trait (`Transport`: publish/read/watch
+records, direct call, direct message, route handle lifecycle). This is what
+keeps the post-POC Iroh migration honest.
 
 ## Components
 
 ### 1. Identity
 
-- A **member identity** is an Ed25519 keypair (Veilid VLD0 crypto system).
-  In the POC, one identity = one device = one keypair; multi-device user
-  identity is future work.
-- The secret key lives in Veilid's ProtectedStore (encrypted at rest).
-- A member's public key is their stable name inside a group. Display names
-  are metadata, never identity.
-- Identity keys are **application keys**, deliberately distinct from the
-  Veilid node keypair — a member can move between nodes/devices (future) and
-  node-level identity stays out of the trust model.
+- A **node identity** is an Ed25519 keypair (VLD0). One node = one daemon =
+  one keypair in the POC.
+- Secret keys live in Veilid's ProtectedStore (encrypted at rest).
+- The public key is the node's stable name inside groups; display names are
+  metadata. Application identity is deliberately distinct from the Veilid
+  node keypair, so a transport swap doesn't change who anyone is.
 
 ### 2. Groups and the root of trust
 
-A **group** is anchored by two keypairs generated at creation:
+A group is anchored by two keypairs generated at creation:
 
-- **Group identity key** — long-lived; its public half is the group ID.
-  Signs the things that define the group: roster versions, ACL policy,
-  invites. Held by admins (POC: the single creator).
-- **Group record owner key** — owns the group's main DHT record (Veilid DHT
-  ownership = write access). In the POC the admin holds both.
+- **Group identity key** — its public half is the group ID; signs roster
+  versions, ACL policy, and invitation tokens. Held by admins (POC: the
+  single creating node).
+- **Group record owner key** — owns the group's DHT record (DHT ownership =
+  write access). POC: the admin holds both.
 
-Group state is published as DHT records (layout in `03-poc-spec.md`):
+Group state lives in DHT records (layout in `03-poc-spec.md`):
 
-- **Group record** — header, signed member roster, signed ACL policy, and a
-  route book (each member's current private-route blob for direct contact).
-  Owner-writable only; members read and verify signatures.
-- **Member outbox records** — one per member, owned by that member. Holds the
-  member's signed, encrypted update log (application data, sync metadata).
-  This keeps the multi-writer problem out of the group record: everyone
-  writes only records they own.
+- **Group record** — header, signed roster, signed ACL policy, route book
+  (members' current contact routes). Owner-writable; members read + verify.
+- **Per-member presence records** — owned by each member: heartbeat
+  timestamp, current route blob, exposed services. Each node writes only
+  records it owns — no multi-writer contention anywhere.
 
-Roster and ACL carry monotonically increasing **versions**; every signed
-artifact references the version it was authored against.
+Roster and ACL carry monotonic versions; every signed artifact references
+the version it was authored against.
 
 ### 3. Invitations (membership plane)
 
-Membership changes only through invites — there is no open "join" endpoint.
+Membership changes only through invitations — there is no open join.
 
-- An **invite** is a compact signed token: group ID, group DHT record key,
-  an admin contact route, a single-use nonce, expiry, and the group identity
-  signature. Encoded as `rmesh://invite/<base64>` (link or QR).
-- Redemption is an `AppCall` to the admin over a Veilid private route; the
-  admin verifies the nonce/expiry, and on acceptance appends the new member
-  (pubkey + role) to the roster, bumps the roster version, re-signs, and
-  re-wraps the group data key for the new member set.
-- Invites are capability-shaped: possession + a fresh keypair is sufficient
-  to request membership; the admin's acceptance is what grants it.
+- An **invitation token** is a compact signed voucher: group ID, group record
+  key, admin contact route, offered role, single-use nonce, expiry, group
+  identity signature. Shared as `rmesh://invite/<base64>` (paste/link/QR).
+- Redemption is a direct call to the admin over the mesh; the admin verifies
+  the voucher, appends the member to the roster, bumps + re-signs it, and
+  re-wraps the group key for the new member set.
+- Any member can *carry* an invite out-of-band; only holders of the group
+  identity key can *mint* one (POC: admin). Voucher validation is done by
+  every member independently — matching the "existing members validate the
+  newcomer cryptographically" model.
 
-### 4. Sync engine (explicit sync)
+### 4. Membership sync (explicit, pull-based)
 
-rmesh converges state through deliberate, observable sync — no
-epidemic gossip:
+Per the brainstorm decision: **explicit sync, not gossip**, for the POC.
 
-- Members **watch** the group record via Veilid DHT watches; a version bump
-  (roster/ACL/route book) triggers a fetch-verify-apply cycle.
-- Application data syncs via **per-member sequence numbers**: each member's
-  outbox is an append-only log; every other member tracks
-  `last_seen[member] = seq` (a version vector) and fetches only the gap.
-- A `SyncRequest`/`SyncResponse` AppCall pair lets two members reconcile
-  directly (faster than DHT propagation, and works for large gaps); the DHT
-  remains the fallback and the source of truth for offline members.
-- All fetched updates are verified (author in roster at that version, ACL
-  permits the operation, signature valid) **before** being applied to local
-  state. Invalid updates are dropped and logged, never partially applied.
-- Local state lives in Veilid's TableStore; the node can restart and resync
-  from its version vector.
+- **DHT watch/poll**: members watch the group record; a roster/ACL version
+  bump triggers fetch → verify → apply.
+- **Direct pull**: on startup, on watch gaps, and periodically, a node asks
+  any reachable member *"who's in this group now?"* (`MembersRequest`) and
+  reconciles: the response carries the signed roster at its version, so a
+  stale or lying peer can't inject members — worst case it withholds news.
+- **Presence & liveness**: each member heartbeats its presence record every
+  T seconds. Peers mark a member `offline` after a missed-heartbeat timeout
+  (health-check semantics from the chat) — presence is *advisory* (routing
+  hint), never a membership change.
+- **Leave**: a leaving member publishes a signed goodbye and the admin prunes
+  it from the roster (roster version bump). Crash-leave is just prolonged
+  `offline`; pruning stays an explicit admin action.
+- Everything applied passes signature + version validation first; invalid
+  data is dropped and logged.
+
+Post-POC this module gains a gossip strategy behind the same interface
+(`MembershipSync` trait) — the upgrade path is a new impl, not a redesign.
 
 ### 5. Routing + ACL layer
 
-Logical routing above Veilid's transport routing:
+The enforcement core — group membership determines who can send what to whom:
 
-- **Addressing**: messages target a member (direct AppCall via their route
-  book entry) or the group (write to own outbox; others pull via sync).
-- **Private routes**: members publish a private-route blob in the route book
-  and refresh it when Veilid rotates routes. Peers never need each other's IP.
-- **ACL policy**: a signed document mapping **roles → capabilities**. POC
-  roles: `admin`, `member`, `observer`. Capabilities: `invite`, `write`,
-  `read`, `manage_roster`, `manage_acl`.
-- **Enforcement is local and universal**: every node checks every inbound
-  update against the roster + ACL at the update's declared version. There is
-  no reference monitor to bypass — an unauthorized write is simply rejected
-  by every honest member.
+- **Addressing**: `(group, member)` for control calls; `(group, member,
+  service)` for tunnels. Contact routes come from the route book / presence
+  records; peers never see each other's IPs (Veilid private routes).
+- **ACL policy**: signed document mapping **roles → capabilities** and
+  **service rules**. POC roles: `admin`, `member`, `observer`. Capabilities:
+  `invite`, `manage_roster`, `manage_acl`, `connect`, `expose`. Service
+  rules: which roles/members may connect to which exposed services
+  (`allow role=member service=postgres`).
+- **Exposed services**: a member declares named services (`postgres →
+  127.0.0.1:5432`) in its presence record. Only declared services are
+  reachable — the daemon is a deny-by-default gateway, not an open proxy to
+  localhost.
+- **Enforcement is local and universal**: the *destination* daemon is the
+  authority for its own services — it validates the caller's membership,
+  role, and the service rule before opening the local connection; callers
+  also pre-check to fail fast. No reference monitor to bypass.
 
-### 6. Content encryption
+### 6. Data plane: port-forward tunnels
 
-- Each group has a symmetric **group data key** (XChaCha20-Poly1305). All
-  outbox payloads are encrypted with it — DHT nodes and non-members see
-  ciphertext.
-- The current data key is distributed by **key-wrapping**: encrypted to each
-  member's X25519 key and published in the group record (`keywrap` subkey).
-- On revocation the admin generates a new data key and re-wraps for the
-  reduced member set → forward exclusion. (POC does not re-encrypt history;
-  a revoked member keeps what they already saw — same as any messaging
-  system.)
+The SSH-port-forwarding model from the brainstorm:
+
+- `rmesh forward --group g --to nodeB:postgres --listen 127.0.0.1:8443`
+  makes the local daemon listen on 8443; each accepted TCP connection becomes
+  a **tunnel**: `TunnelOpen` (authenticated, ACL-checked at B) then a
+  bidirectional stream of `TunnelData` chunks, then `TunnelClose`.
+- Transport mapping (POC): tunnels run over Veilid AppCall/AppMessage with
+  per-tunnel ids, chunking, sequence numbers, and backpressure via
+  acknowledged windows — Veilid has no native byte-streams, so the adapter
+  provides a small reliable-stream shim. (On Iroh this shim collapses to a
+  native QUIC stream — another reason the adapter owns it.)
+- Every chunk is end-to-end encrypted member↔member (transport encryption
+  from Veilid, plus rmesh session keys derived per tunnel — non-members and
+  relays see nothing).
+- Throughput over private routes will be modest; the POC target is
+  correctness (`psql`, `ssh`, `curl` work reliably), not line-rate. A
+  latency/throughput measurement is a POC exit criterion, informing the Iroh
+  decision.
+
+### 7. Content encryption
+
+- Group control state (roster details, ACL, presence, service catalogs) is
+  encrypted with a symmetric **group key** (XChaCha20-Poly1305): DHT nodes
+  and non-members see ciphertext.
+- The group key is distributed by key-wrapping to each member's X25519 key
+  (`keywrap` subkey), and **rotated on revocation** → forward exclusion.
+- Tunnels additionally derive per-tunnel session keys (X25519 ECDH between
+  the two members + BLAKE3 KDF) so tunnel content isn't even readable by
+  other group members.
+
+## Daemon & CLI shape
+
+One binary, two modes: `rmeshd` (long-running service; systemd unit) and
+`rmesh` (CLI talking to the daemon over a local unix socket). CLI surface for
+the POC:
+
+```
+rmesh node status | id show
+rmesh group create <name> | show | members | leave
+rmesh invite create --group g --role member --ttl 24h
+rmesh join <rmesh://invite/…>
+rmesh expose add postgres 127.0.0.1:5432 --group g
+rmesh forward --group g --to <member>:postgres --listen 127.0.0.1:8443
+rmesh acl show | allow --group g --role member --service postgres
+rmesh revoke --group g <member>
+```
 
 ## Crate layout (planned)
 
@@ -134,28 +183,30 @@ rmesh/
 ├── crates/
 │   ├── rmesh-proto/           # schemas, envelopes, signing & validation.
 │   │                          #   Pure: no I/O, no veilid dep. The TCB.
-│   ├── rmesh-core/            # group/invite/sync/ACL state machines,
-│   │                          #   storage traits. Depends on -proto.
-│   ├── rmesh-veilid/          # veilid-core adapter: DHT record I/O,
-│   │                          #   routes, AppCall plumbing, watches.
-│   └── rmesh-cli/             # the POC binary: node daemon + CLI commands.
+│   ├── rmesh-core/            # group/invite/sync/ACL/tunnel state machines,
+│   │                          #   Transport + MembershipSync traits, storage
+│   │                          #   traits. Depends only on -proto.
+│   ├── rmesh-veilid/          # the ONLY crate importing veilid-core:
+│   │                          #   Transport impl, DHT I/O, routes, stream shim.
+│   └── rmesh-cli/             # rmeshd daemon + rmesh CLI (unix socket RPC).
 └── docs/
 ```
 
-The dependency rule: `proto ← core ← veilid-adapter ← cli`. Everything
-security-critical is in `rmesh-proto` + `rmesh-core` and testable
-with an in-memory fake network — the Veilid adapter is replaceable plumbing.
+Dependency rule: `proto ← core ← veilid ← cli`. Everything security-critical
+sits in `proto` + `core`, testable with an in-memory fake `Transport` — and
+the same fake is the harness that later validates an `rmesh-iroh` adapter.
 
 ## Trust model (POC)
 
 | Actor | Trusted with |
 |---|---|
-| Group admin | Membership decisions, ACL policy, data-key rotation. **Not** able to forge other members' messages. |
-| Members | Reading group content; writing per their role. |
-| Veilid DHT / relay nodes | Availability only. Can withhold or delay data; cannot read content (E2EE) or forge state (signatures). |
-| Bootstrap servers | First contact into Veilid. Self-hostable. |
+| Group admin | Membership decisions, ACL policy, key rotation. Cannot forge members' messages or read tunnels it isn't an endpoint of. |
+| Members | Reading group state; connecting per ACL; honesty of their own presence/service declarations. |
+| Veilid DHT / relays | Availability only — can withhold/delay, cannot read (E2EE) or forge (signatures). |
+| Bootstrap servers | First contact into the Veilid network; self-hostable. |
 
-Known POC-accepted risks (tracked for post-POC): admin is a single point of
-membership control (no admin quorum); DHT withholding = availability attack;
-metadata (record access patterns) partially mitigated by Veilid safety
-routes; no post-compromise security beyond data-key rotation.
+POC-accepted risks (tracked in the roadmap): single-admin membership control
+(no quorum); DHT withholding as availability attack; presence records are
+self-declared (a member can lie about liveness/services — it only affects
+routing to *itself*); no post-compromise security beyond key rotation;
+traffic analysis resistance bounded by what Veilid safety routes provide.
