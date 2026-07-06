@@ -1,6 +1,6 @@
-# Telescale — Architecture
+# rmesh — Architecture
 
-This document describes the system architecture of the Telescale POC on
+This document describes the system architecture of the rmesh POC on
 Veilid. Data schemas live in `03-poc-spec.md`; protocol flows in
 `04-protocols.md`.
 
@@ -10,7 +10,7 @@ Veilid. Data schemas live in `03-poc-spec.md`; protocol flows in
 ┌─────────────────────────────────────────────────────────┐
 │  Apps (POC: CLI chat / kv-doc demo)                     │
 ├─────────────────────────────────────────────────────────┤
-│  Telescale layer (this project)                         │
+│  rmesh layer (this project)                             │
 │  ┌──────────┐ ┌──────────┐ ┌────────┐ ┌──────────────┐  │
 │  │ Identity │ │ Groups & │ │  Sync  │ │ Routing +    │  │
 │  │          │ │ Invites  │ │ Engine │ │ ACL          │  │
@@ -24,7 +24,7 @@ Veilid. Data schemas live in `03-poc-spec.md`; protocol flows in
 └─────────────────────────────────────────────────────────┘
 ```
 
-Telescale never talks to sockets directly; everything below the Telescale
+rmesh never talks to sockets directly; everything below the rmesh
 layer is Veilid's job. Conversely, Veilid knows nothing about groups, members,
 or ACLs.
 
@@ -71,7 +71,7 @@ Membership changes only through invites — there is no open "join" endpoint.
 
 - An **invite** is a compact signed token: group ID, group DHT record key,
   an admin contact route, a single-use nonce, expiry, and the group identity
-  signature. Encoded as `telescale://invite/<base64>` (link or QR).
+  signature. Encoded as `rmesh://invite/<base64>` (link or QR).
 - Redemption is an `AppCall` to the admin over a Veilid private route; the
   admin verifies the nonce/expiry, and on acceptance appends the new member
   (pubkey + role) to the roster, bumps the roster version, re-signs, and
@@ -81,7 +81,7 @@ Membership changes only through invites — there is no open "join" endpoint.
 
 ### 4. Sync engine (explicit sync)
 
-Telescale converges state through deliberate, observable sync — no
+rmesh converges state through deliberate, observable sync — no
 epidemic gossip:
 
 - Members **watch** the group record via Veilid DHT watches; a version bump
@@ -132,18 +132,18 @@ Logical routing above Veilid's transport routing:
 rmesh/
 ├── Cargo.toml                 # workspace
 ├── crates/
-│   ├── telescale-proto/       # schemas, envelopes, signing & validation.
+│   ├── rmesh-proto/           # schemas, envelopes, signing & validation.
 │   │                          #   Pure: no I/O, no veilid dep. The TCB.
-│   ├── telescale-core/        # group/invite/sync/ACL state machines,
+│   ├── rmesh-core/            # group/invite/sync/ACL state machines,
 │   │                          #   storage traits. Depends on -proto.
-│   ├── telescale-veilid/      # veilid-core adapter: DHT record I/O,
+│   ├── rmesh-veilid/          # veilid-core adapter: DHT record I/O,
 │   │                          #   routes, AppCall plumbing, watches.
 │   └── rmesh-cli/             # the POC binary: node daemon + CLI commands.
 └── docs/
 ```
 
 The dependency rule: `proto ← core ← veilid-adapter ← cli`. Everything
-security-critical is in `telescale-proto` + `telescale-core` and testable
+security-critical is in `rmesh-proto` + `rmesh-core` and testable
 with an in-memory fake network — the Veilid adapter is replaceable plumbing.
 
 ## Trust model (POC)
