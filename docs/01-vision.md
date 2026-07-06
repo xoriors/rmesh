@@ -2,99 +2,113 @@
 
 ## One-liner
 
-**rmesh is a decentralized private network layer: Tailscale-like groups of
-people and devices, with no coordination server, no accounts, and no company
-in the middle.**
+**rmesh is a Tailscale-like private network without the VPN and without the
+coordination server: machines across clouds and homes form invitation-only
+groups inside a peer-to-peer mesh, and traffic flows directly between peers.**
 
 ## The problem
 
-Tailscale showed how good the UX of a private overlay network can be: install,
-log in, and your devices see each other — with ACLs, key distribution, and NAT
-traversal handled for you. But that UX is anchored to a **centralized
-coordination plane**: a company-operated control server holds the device
-directory, distributes keys, evaluates ACLs, and can (in principle) remove or
-add members of your network. The data plane is end-to-end encrypted, but the
-*membership and policy plane* is not yours.
+You have machines everywhere — EC2 instances in AWS, VMs in Azure, bare-metal
+servers, a workstation at home — and you want them to talk to each other
+privately, as if they shared a network. Today's answers:
 
-rmesh asks: what does the same experience look like when the coordination
-plane is **also** decentralized?
+- **VPN hub (WireGuard/OpenVPN server)**: all traffic hairpins through a
+  server you must host, pay for, and trust; latency suffers.
+- **Tailscale / NetBird / ZeroTier**: excellent UX, direct WireGuard paths —
+  but membership, key distribution, and ACLs live in a **company-operated
+  coordination plane**. The data plane is E2EE; the control plane is not
+  yours.
 
-- **Membership** is a signed data structure replicated over a public DHT — not
-  a row in a vendor's database.
-- **Invitations** replace accounts: you join a group because an admin handed
-  you a cryptographic invite, not because you logged into the same identity
-  provider.
-- **ACLs** are policy documents signed by the group's own keys and enforced by
-  every member independently.
-- **Transport** is a peer-to-peer network with NAT traversal and
-  privacy-preserving routing — no rendezvous server you must trust.
+rmesh takes the third path: **fully decentralized**. Peer-to-peer transport
+(no VPN server → traffic goes direct, like torrents, lower latency) *and* a
+decentralized control plane (membership, invitations, ACLs are signed data
+structures the peers themselves replicate and verify — no company in the
+middle).
 
-## Why Veilid
+## What it looks like in use
 
-Building the substrate — DHT, NAT traversal, relaying, onion-style private
-routing, transport encryption — is years of work and not where rmesh's
-value is. [Veilid](https://veilid.com) already provides exactly this layer,
-open source and in Rust:
+An rmesh **service/daemon** runs on every node. Node instances find each
+other over the mesh and enforce group boundaries:
 
-| Need | Veilid feature |
-|---|---|
-| Node identity | Cryptographic node keypairs (VLD0: Ed25519 / X25519 / XChaCha20-Poly1305 / BLAKE3) |
-| Shared state without servers | DHT records with owner/writer keys and subkey schemas |
-| Change propagation | DHT value watches |
-| Direct member-to-member RPC | `AppCall` / `AppMessage` over routing contexts |
-| Sender/receiver privacy | Safety routes + private routes (onion-like) |
-| NAT traversal, relays, bootstrap | Built into veilid-core; public bootstrap or self-hosted |
-| Local encrypted storage | TableStore / ProtectedStore |
+- **Groups** are private networks inside the big mesh — VPC-style
+  segmentation. Only members of a group can communicate within it.
+- **Joining is invitation-based**: create a group on node A, it mints a
+  cryptographic invitation token; paste it into the CLI on node B; existing
+  members validate the voucher and node B is in.
+- **Access is like SSH port forwarding**: an app on machine A connects to a
+  local port served by the rmesh daemon; the daemon carries the bytes over
+  the encrypted mesh to the rmesh daemon on machine B, which forwards them to
+  the target port on B's localhost. The daemons are the gateways — the
+  routing + ACL layer decides, on every node, whether a given peer may reach
+  a given service.
 
-rmesh is therefore an **application-layer protocol on top of Veilid**:
-groups, invitations, membership, sync, and ACLs — the things Veilid
-deliberately does not opine on.
+```
+app ──▶ localhost:8443 (rmesh daemon, machine A)
+             │  E2E-encrypted, peer-to-peer (direct when possible)
+             ▼
+        rmesh daemon (machine B) ──▶ localhost:5432 (postgres)
+```
 
-## The POC (this repo, `rmesh`)
+## Transport strategy: Veilid now, Iroh option later
 
-The proof of concept is a Rust node + CLI that demonstrates the full
-membership lifecycle over the live Veilid network:
+Building DHTs, NAT traversal, relays, and private routing from scratch is
+years of work that isn't rmesh's value. Two Rust libraries were evaluated:
 
-1. **Create a group** — generates the group's root of trust and publishes its
-   DHT records.
-2. **Invite** — admin mints a signed, expiring invite token (shareable as a
-   link/QR).
-3. **Join** — invitee redeems the invite over a Veilid private route; the
-   admin verifies and adds them to the signed roster.
-4. **Sync** — members explicitly sync group state (roster, ACLs, application
-   data) via DHT watches + version-numbered records. No hidden gossip; sync is
-   observable and deliberate.
-5. **Send** — members exchange end-to-end encrypted application payloads
-   (demo: chat messages / small key-value documents), with every message
-   checked against the roster and ACL policy at its version.
-6. **Revoke** — admin removes a member; the group data key rotates so the
-   removed member is cryptographically excluded going forward.
+- **[Veilid](https://veilid.com)** — batteries-included P2P framework: DHT
+  with encrypted records, peer discovery, connection management, RPC
+  (AppCall/AppMessage), privacy-preserving private routes, VLD0 crypto suite
+  (Ed25519/X25519/XChaCha20-Poly1305/BLAKE3), mobile-first multi-platform.
+  Opinionated — custom routing semantics fight its abstractions.
+- **[Iroh](https://iroh.computer)** — thin QUIC transport: best-in-class hole
+  punching, stateless relays. No DHT/storage/RPC of its own — discovery
+  (e.g. mainline DHT with encrypted metadata) and everything above it is
+  yours to build, which is exactly what full custom routing control needs.
 
-What the POC intentionally does **not** do: overlay IP networking (TUN
-devices, subnet routing), multi-device user identity, large file transfer,
-mobile clients. Those are on the roadmap (see `05-roadmap.md`) once the
-membership/sync/ACL core is proven.
+**Decision (see `00-brainstorm-decisions.md`): POC on Veilid** — fastest way
+to validate what actually matters (groups, invitations, membership sync, the
+routing/ACL model) because discovery, DHT, encryption, and RPC come for free.
+**Iroh + mainline DHT remains the planned migration path** if/when custom
+path selection (latency-, bandwidth-, reputation-aware routing) becomes the
+differentiator. Consequently the POC keeps all transport access behind a
+narrow adapter so the swap is realistic, and treats Veilid-specific features
+with care.
+
+## The POC (this repo)
+
+A Rust daemon + CLI (`rmesh`) proving the lifecycle end to end on real
+machines across real NATs:
+
+1. **Create a group** on one node — the group's root of trust and DHT records.
+2. **Invite** — mint a signed, expiring invitation token (link/QR/paste).
+3. **Join** — redeem the invite over the mesh; members validate the voucher
+   cryptographically; the roster updates.
+4. **Sync membership explicitly** — nodes pull "who's in this group now?"
+   from members and the group's DHT records; joins/leaves propagate by
+   explicit sync (no gossip yet); dead nodes are detected by health-check
+   timeouts; leaves announce goodbye.
+5. **Forward ports** — `rmesh forward` opens a local port that tunnels to a
+   port on another member, subject to the ACL; this is the demo that matters:
+   `psql` from an AWS box to a bare-metal Postgres through the mesh, no VPN,
+   no public exposure.
+6. **Enforce ACLs** — roles and per-service rules checked by every node on
+   every connection; revoke a member and watch its access die.
+
+Out of scope for the POC: true gossip membership propagation, custom path
+selection, overlay IP/TUN mode, web dashboard, mobile and browser clients.
+All are roadmap items (`05-roadmap.md`); none are blocked by POC decisions.
 
 ## Design principles
 
-1. **No privileged infrastructure.** Anything an "admin" does is expressed as
-   signed data any member can verify. Admins are roles, not servers.
-2. **Explicit sync.** State converges because members deliberately sync
-   versioned records — never because of opaque background gossip. Every state
-   transition is attributable to a signed update.
-3. **Verify, don't trust.** Every roster change, ACL change, and message is
-   signed and validated against the membership state at that version. A
-   malicious relay or DHT node can withhold data, but never forge it.
+1. **No privileged infrastructure.** Admins are roles expressed in signed
+   data, not servers. Any member can verify everything.
+2. **Explicit sync.** Membership converges through deliberate, observable
+   pulls and version bumps — attributable, debuggable, no opaque gossip (yet).
+3. **Verify, don't trust.** Every roster change, ACL change, and connection
+   attempt is validated against signed state on every node. The DHT and
+   relays are trusted for availability only.
 4. **E2EE above the transport.** Veilid encrypts transport and DHT records;
-   rmesh additionally encrypts group content with a group data key known
-   only to current members, rotated on membership change.
-5. **Small trusted computing base.** The POC's security-critical surface is
-   the schema definitions and validation logic — kept in one crate,
-   property-testable without a network.
-
-## Naming
-
-- **rmesh** — the project: the protocol layer, this repository, and the POC
-  node/CLI binary.
-- **Veilid** — the underlying P2P network library (external project,
-  unaffiliated).
+   rmesh additionally encrypts group state so non-members (including DHT
+   nodes) see nothing, and rotates keys on membership change.
+5. **Swappable transport.** All Veilid access goes through one adapter crate
+   with a minimal interface — the Iroh migration must never require touching
+   group/ACL/sync logic.
