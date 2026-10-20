@@ -60,3 +60,23 @@ central VPN server → lower latency).
 - Custom path selection (latency/bandwidth/reputation-aware routing).
 - Web dashboard; mobile clients.
 - Overlay IP mode (TUN device) vs. port-forwarding-only.
+
+---
+
+## Amendments — 2026-10 landscape review
+
+A competitive-landscape review (see `06-landscape.md`) found the closest
+existing project, **Rayfish** (Rust, iroh, MPL-2.0, experimental), already
+shipping the generic "Tailscale without the coordination server" pitch, and
+found that iroh now provides what decision #7 said it lacked: mainline-DHT
+discovery (pkarr signed records, opt-in `discovery-pkarr-dht`) plus
+`iroh-gossip`. Decisions revised accordingly:
+
+| # | Revision | Rationale |
+|---|---|---|
+| 6′ | **Supersedes #6/#7: build directly on iroh — no Veilid POC.** | The Veilid-first rationale ("iroh has no DHT, more to wire up") is stale: iroh ships pkarr/mainline-DHT discovery and gossip. A Veilid POC behind an adapter would be throwaway work; Veilid's ecosystem is smaller. Native QUIC streams also collapse the tunnel shim. |
+| 11 | **Positioning: the container-native, privacy-first variant** — not a general mesh VPN. | The generic pitch is taken (Rayfish is far ahead on it). rmesh's wedge is four choices Rayfish doesn't make: (a) admins as roles in per-member signed data, not a shared network secret key; (b) *encrypted* group state — roster invisible to DHT nodes, key rotation on membership change; (c) unprivileged port-forward mode — no TUN, no root: containers, CI runners, shared hosts; (d) per-service, per-role ACLs verified on every node, not host firewall rules. |
+| 12 | **Unprivileged `rmesh forward` demo is the proof point** and stays the POC exit criterion. | It's the fastest demonstration of wedge (c) and needs no sudo anywhere. |
+
+Decision #4 (explicit sync for the POC) stands; `iroh-gossip` makes the
+post-POC gossip upgrade cheaper than planned. Decisions #1–#5, #8–#10 stand.

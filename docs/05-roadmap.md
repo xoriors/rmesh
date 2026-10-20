@@ -2,51 +2,55 @@
 
 Phases ordered so every phase ends runnable and demoable; security-critical
 logic (proto/core) is built and tested before the network is involved. The
-POC path implements the brainstorm decisions (`00-brainstorm-decisions.md`);
-post-POC items keep the doors open that the chat explicitly flagged (gossip,
-Iroh migration, mobile, dashboard).
+POC implements the brainstorm decisions as amended by the 2026-10 landscape
+review (`00-brainstorm-decisions.md`): **iroh directly, no Veilid detour**,
+and the unprivileged `rmesh forward` demo as the proof point.
 
 ## Phase 0 — Foundations
 
-**Goal: a daemon that attaches to Veilid; workspace skeleton in place.**
+**Goal: a daemon that comes up on iroh; workspace skeleton in place.**
 
-- [ ] Cargo workspace: `rmesh-proto`, `rmesh-core`, `rmesh-veilid`,
+- [ ] Cargo workspace: `rmesh-proto`, `rmesh-core`, `rmesh-iroh`,
       `rmesh-cli`.
-- [ ] Pin veilid-core; minimal node: init, attach, report network state
-      (`rmesh node status`).
-- [ ] Identity: generate/load node keypair (ProtectedStore), `rmesh id show`.
-- [ ] `Transport` trait in `rmesh-core` + in-memory fake for tests; the
-      Veilid impl in `rmesh-veilid` (the Iroh-swap seam from day one).
-- [ ] Daemon/CLI split over a unix socket; systemd unit example.
+- [ ] Pin iroh; minimal endpoint: come up, resolve/publish discovery,
+      report state (`rmesh node status`).
+- [ ] Identity: generate/load node keypair (= EndpointId) + X25519 pair in
+      the encrypted keystore; `rmesh id show`.
+- [ ] `Transport` trait in `rmesh-core` + in-memory fake for tests; iroh
+      impl in `rmesh-iroh`.
+- [ ] Daemon/CLI split over a unix socket; systemd *user* unit + container
+      example (unprivileged is the point — prove it immediately).
 - [ ] CI: fmt, clippy, test — no network needed in tests.
 
-**Demo:** `rmesh node status` shows an attached Veilid node with our identity.
+**Demo:** `rmesh node status` on two machines shows live endpoints that can
+dial each other by key (direct or via relay).
 
 ## Phase 1 — Groups (single member)
 
-**Goal: create a group and read it back — schemas proven on the real DHT.**
+**Goal: create a group; announce + encrypted state proven on the real DHT.**
 
 - [ ] `rmesh-proto`: all `03-poc-spec.md` structs, canonical CBOR,
       domain-separated sign/verify; property tests (roundtrip, tamper).
-- [ ] Group key generation, key-wrapping, encrypted DHT subkeys.
-- [ ] `rmesh group create <name>` / `rmesh group show` — show fetches from
-      the DHT and verifies signatures even for our own group, so the
+- [ ] Group key generation, key-wrapping, state encrypt/decrypt.
+- [ ] pkarr announce publish/resolve (+ 60-min republish timer).
+- [ ] `rmesh group create <name>` / `rmesh group show` — show re-resolves
+      the announce and re-verifies the state even for our own group, so the
       validation path is exercised from day one.
-- [ ] Presence record + heartbeat loop.
 
 **Demo:** create a group on machine A; restart the daemon; `group show`
-rebuilds verified state from TableStore + DHT.
+rebuilds verified state from store + announce.
 
 ## Phase 2 — Invitations and join
 
-**Goal: two real machines, one group — the invitation-based membership pillar.**
+**Goal: two real machines, one group — invitation-based membership.**
 
 - [ ] Invite mint/encode/parse (`rmesh invite create --role member --ttl 24h`).
-- [ ] Private-route plumbing + envelope RPC in `rmesh-veilid`.
-- [ ] JoinRequest/Accept/Reject state machines (admin + joiner sides).
-- [ ] Roster v+1 + KeyWrapSet publish; joiner verify-and-unwrap.
-- [ ] Negative tests: expired invite, replayed nonce, tampered invite, stolen
-      invite without key possession.
+- [ ] Control-stream RPC (ALPN `rmesh/0`, channel-bound peer identity).
+- [ ] JoinRequest/Accept/Reject state machines (admin + joiner sides);
+      state v+1 with re-wrap; joiner verify-and-unwrap; announce republish
+      + `Poke`.
+- [ ] Negative tests: expired invite, replayed nonce, tampered invite,
+      stolen invite on a channel not matching the claimed node.
 
 **Demo:** machine B joins via a pasted `rmesh://invite/…` from machine A;
 `rmesh group members` agrees on both.
@@ -55,86 +59,95 @@ rebuilds verified state from TableStore + DHT.
 
 **Goal: the "explicit sync for updates" pillar.**
 
-- [ ] DHT watch on the group record; version-ordered fetch-verify-apply.
-- [ ] `MembersRequest`/`MembersResponse` direct pull (startup, periodic, gap).
-- [ ] Presence watches; offline detection at 3 missed heartbeats; `Goodbye` +
-      admin prune for voluntary leave; rejoin resync.
-- [ ] Pending queue for updates referencing a future roster version.
-- [ ] `MembershipSync` behind a trait (the future gossip seam).
-- [ ] Chaos tests on the in-memory fake transport: partitions, stale peers,
-      withholding peers — state must converge and never accept unsigned data.
+- [ ] Announce poll/refresh; `StateRequest` by hash; `MembersRequest`
+      direct pull (startup, periodic, on gap); version-sequence validation
+      with audited catch-up.
+- [ ] Presence heartbeats; offline at 3 missed beats; `Goodbye` + admin
+      prune; rejoin resync.
+- [ ] Bootstrap members re-publishing the announce (admin-offline
+      survivability).
+- [ ] `MembershipSync` behind a trait (the future iroh-gossip seam).
+- [ ] Chaos tests on the fake transport: partitions, stale peers,
+      withholding peers, announce rollback attempts — state must converge
+      and never accept unsigned/unsequenced data.
 
-**Demo:** 3 nodes; kill one mid-session, watch peers mark it offline; restart
-it and watch it resync and come back online.
+**Demo:** 3 nodes; kill one mid-session, watch peers mark it offline;
+restart it and watch it resync; take the admin offline and confirm the
+group still syncs (and that *changes* correctly queue).
 
 ## Phase 4 — Routing + ACL + the port-forward data plane
 
-**Goal: the actual product moment — `psql` across clouds with no VPN.**
+**Goal: the product moment — `psql` across clouds, no VPN, no root.**
 
-- [ ] `rmesh expose add <name> <host:port>` (declared in presence).
+- [ ] `rmesh expose add <name> <host:port>` (declared via presence).
 - [ ] ACL: role capabilities + service rules, default deny;
       `rmesh acl show/allow`.
-- [ ] Tunnel protocol: open/accept/data/ack/close, chunking, 32-chunk window,
-      per-tunnel session keys; reliable-stream shim in the adapter.
+- [ ] Tunnel streams: TunnelOpen/Ok/Err header frames, raw byte piping,
+      FIN/RST mapping; destination-side authoritative enforcement;
+      observable rejects.
 - [ ] `rmesh forward --to <member>:<service> --listen <addr>`.
-- [ ] Destination-side authoritative enforcement + observable rejects.
-- [ ] Revocation: roster removal + key epoch rotation + live-tunnel teardown.
+- [ ] Revocation: state v+1 + epoch rotation + live-tunnel teardown.
 - [ ] Adversarial tests: non-member opens tunnel, member without Connect,
-      undeclared service, rule-denied pair, revoked node replaying old
-      routes, observer trying anything.
-- [ ] Baseline latency/throughput measurements over private routes (input to
-      the Iroh decision).
+      undeclared service, rule-denied pair, revoked node with old state,
+      observer trying anything.
+- [ ] Baseline latency/throughput: direct path vs. relay fallback, vs. a
+      raw `iroh` stream (our overhead), vs. Tailscale on the same pair
+      (context).
 
-**Demo:** Postgres on a bare-metal box, `psql` from an AWS instance through
-the mesh; revoke the AWS node live and watch the tunnel drop and reconnects
-get denied.
+**Demo:** Postgres on a bare-metal box, `psql` from an AWS instance and
+from a *rootless container* through the mesh; revoke the container's node
+live and watch the tunnel drop and reconnects get denied.
 
 ## Phase 5 — POC hardening & demo polish
 
 **Goal: something you can hand to a stranger with a README.**
 
-- [ ] `rmesh doctor`: attachment state, watch health, roster/ACL versions,
-      presence table, recent rejects with reasons.
-- [ ] Resilience: offline start, DHT slow paths, route decay, admin-offline
-      behavior documented (joins/revocations queue until admin returns).
+- [ ] `rmesh doctor`: endpoint/discovery state, announce freshness, state
+      versions, presence table, recent rejects with reasons.
+- [ ] Resilience: offline start, DHT slow paths, relay-only networks,
+      admin-offline behavior documented (joins/revocations queue).
 - [ ] Structured audit log of membership changes + rejected traffic.
-- [ ] Docs: quickstart, demo script, threat-model recap.
+- [ ] Docs: quickstart, demo script, threat-model recap; positioning
+      one-pager aligned with `06-landscape.md`.
 - [ ] Tag `v0.1.0-poc`.
 
 **POC exit criteria:** 3+ nodes on different networks (NAT'd, mixed cloud +
-bare metal) create a group, invite, sync membership, forward real TCP
-services under ACL, and revoke a member — with zero infrastructure of ours
-running anywhere, and measured tunnel performance numbers in hand.
+bare metal + one rootless container) create a group, invite, sync
+membership, forward real TCP services under ACL, and revoke a member — with
+zero infrastructure of ours running anywhere, **zero sudo anywhere**, and
+measured tunnel performance numbers in hand.
 
 ## Post-POC directions
 
 Recorded so POC decisions don't paint us out of them; unscheduled.
 
-1. **Gossip membership propagation** — swap the explicit-sync impl behind
-   `MembershipSync` for an epidemic protocol; the chat's stated evolution.
-2. **Iroh + mainline DHT transport** — implement `rmesh-iroh` against the
-   `Transport` trait (tunnel shim becomes a native QUIC stream); encrypted
-   discovery metadata on the mainline DHT; compare hole-punch success and
-   throughput against the Phase 4 baselines, then choose per deployment.
-3. **Custom path selection** — latency-, bandwidth-, reputation-aware
-   routing; the reason Iroh stays on the table.
-4. **Overlay IP mode (TUN)** — group members get stable overlay addresses,
-   ACLs become packet policy; port forwarding remains the no-root fallback.
-5. **Admin quorum** — group identity key → threshold signatures (FROST);
-   removes the single-admin trust concentration.
-6. **Multi-device identity** — user key signs device keys.
-7. **Web dashboard** (the chat's "CLI first, web UI later") and **mobile**
-   (Veilid is mobile-first; wasm/browser stays out — relay-only, low value).
-8. **UDP forwarding**, large-transfer optimization, self-hosted bootstrap
-   for air-gapped deployments.
+1. **Gossip membership propagation** — `iroh-gossip` per-group topics
+   behind `MembershipSync`; presence and pokes become gossip; validation
+   pipeline unchanged.
+2. **Admin quorum** — group identity key → threshold signatures (FROST);
+   removes the single-admin trust concentration and doubles down on
+   differentiator #1 (per-admin accountability — `06-landscape.md`).
+3. **Overlay IP mode (TUN)** — *optional* privileged mode for whole-network
+   use cases (where Rayfish lives today); port forwarding stays the
+   container-native default.
+4. **Multi-device identity** — user key signs device keys.
+5. **Web dashboard** (chat decision #8: CLI first) and **mobile** (iroh on
+   iOS/Android; more integration work than Veilid would have been — the
+   price of amendment 6′, accepted).
+6. **UDP forwarding**, large transfers (iroh-blobs), service naming sugar.
+7. **Self-hosted relays/DNS** for constrained or air-gapped deployments.
+8. **Anonymity option** — if route-level privacy (who-talks-to-whom) ever
+   becomes a requirement, evaluate per-group onion-style relaying; rmesh's
+   current claim is content + membership privacy only.
 
 ## Open questions (to settle during Phases 0–2)
 
-- veilid-core watch capacity per node (may force header polling for big
-  groups); DHT record TTL/keepalive semantics for offline groups.
-- Realistic AppCall throughput/latency over private routes vs. safety-route
-  settings — how usable are interactive tunnels (ssh) in practice?
-- Whether tunnels should default to private routes (max privacy) or allow
-  direct-connection mode inside a group (max speed) — likely a per-group
-  policy knob.
-- veilid-core API stability — pin the version; the adapter isolates churn.
+- pkarr record size in practice: how many bootstrap EndpointIds fit beside
+  versions/hash in ~1 KiB; republish cadence vs. mainline expiry.
+- iroh discovery latency cold vs. warm; mDNS behavior in container
+  networks without multicast.
+- Whether `JoinAccept` carrying full `GroupState` needs chunking for
+  large groups (control-frame cap is 64 KiB; state cap 256 KiB).
+- Relay-only environments (UDP blocked): throughput/latency floor for
+  interactive tunnels (ssh) — measure in Phase 4.
+- iroh API stability across minor versions; pin + isolate in `rmesh-iroh`.
