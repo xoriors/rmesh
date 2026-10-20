@@ -1,13 +1,13 @@
 # rmesh POC — Data Spec
 
-Concrete schemas for the POC. Encoding is **canonical CBOR** (serde +
-`ciborium`, deterministic map ordering) — everything signed must have a
-canonical byte form. Hashes BLAKE3, signatures Ed25519, DH X25519, symmetric
-crypto XChaCha20-Poly1305 (Veilid VLD0 suite).
+Concrete schemas for the POC on Veilid. Encoding is **canonical CBOR**
+(serde + `ciborium`, deterministic map ordering) — everything signed must
+have a canonical byte form. Hashes BLAKE3, signatures Ed25519, DH X25519,
+symmetric crypto XChaCha20-Poly1305 (Veilid VLD0 suite).
 
 > Veilid API specifics (record schemas, watches, size limits) must be
-> re-verified against the veilid-core version pinned at implementation time;
-> the shapes here are the contract, exact calls may differ.
+> re-verified against the veilid-core version pinned at implementation
+> time; the shapes here are the contract, exact calls may differ.
 
 ## Conventions
 
@@ -20,9 +20,10 @@ type RecordKey = ...;        // transport DHT record key (opaque to core)
 type Nonce     = [u8; 24];
 ```
 
-Every signed struct: signature over `blake3(domain_sep || canonical_cbor(struct
-minus sig))`, domain separator per type, e.g. `b"rmesh/roster/v1"` — prevents
-cross-context signature reuse.
+Every signed struct: signature over `blake3(domain_sep ||
+canonical_cbor(struct minus sig))`, domain separator per type
+(`b"rmesh/roster/v1"`, `b"rmesh/invite/v1"`, …) — prevents cross-context
+signature reuse.
 
 ## DHT record layout
 
@@ -30,8 +31,9 @@ cross-context signature reuse.
 
 Owner: group record owner key (admin). Members read + verify; all subkeys
 owner-writable (DFLT schema). Subkeys 1–4 are encrypted with the group key
-(non-members see ciphertext); subkey 0 is plaintext-but-signed (bootstrap
-needs it before key unwrap).
+(non-members and DHT nodes see ciphertext — differentiator #2 in
+`06-landscape.md`); subkey 0 is plaintext-but-signed (bootstrap needs it
+before key unwrap).
 
 | Subkey | Content | Changes when |
 |---|---|---|
@@ -120,8 +122,8 @@ struct KeyWrap {
 
 ### Presence record (one per member per group)
 
-Owner: the member. Heartbeat + self-declared state; encrypted with the group
-key. **Advisory only** — never a membership source of truth.
+Owner: the member. Heartbeat + self-declared state; encrypted with the
+group key. **Advisory only** — never a membership source of truth.
 
 ```rust
 struct Presence {
@@ -156,7 +158,7 @@ struct Invite {
     role: Role,               // offered role
     nonce: Nonce,             // single-use
     expires_at: u64,
-    sig: Sig,                 // group identity key = the "voucher"
+    sig: Sig,                 // group identity key = the voucher
 }
 ```
 
@@ -166,8 +168,8 @@ verify a redeemed invite via `invite_hash` in the roster entry.
 
 ## RPC envelopes
 
-All direct node↔node communication (AppCall for request/response, AppMessage
-for fire-and-forget) uses one envelope:
+All direct node↔node communication (AppCall for request/response,
+AppMessage for fire-and-forget) uses one envelope:
 
 ```rust
 struct Envelope {
@@ -208,30 +210,34 @@ enum Body {
 ```
 
 Tunnel session key: `blake3_kdf("rmesh/tunnel/v1", ecdh(eph_a, eph_b),
-group_id, tunnel_id)`; `TunnelData.ct` is XChaCha20-Poly1305 with the seq in
-the nonce — content is private even from other group members. Window: send up
-to 32 unacked chunks, then wait for `TunnelAck`.
+group_id, tunnel_id)`; `TunnelData.ct` is XChaCha20-Poly1305 with the seq
+in the nonce — content is private even from other group members. Window:
+send up to 32 unacked chunks, then wait for `TunnelAck`. (On an Iroh
+transport this whole framing collapses to a native QUIC stream; it lives in
+the adapter for that reason.)
 
 ## Validation rules (normative)
 
-**Envelope**: signature valid for `from` with per-kind domain separator, and
-`ts` within the replay bound. Then, unless the body is `JoinRequest`, `from`
-must be in the local roster.
+**Envelope**: signature valid for `from` with per-kind domain separator,
+and `ts` within the replay bound. Then, unless the body is `JoinRequest`,
+`from` must be in the local roster.
 
 **Roster version V**: signed by the group identity key, `V == local + 1`
 (apply strictly in sequence; pull the gap via `MembersRequest` on a jump),
 and deltas comply with the ACL at `V − 1` (`ManageRoster`).
 
 **AclPolicy / RouteBook / KeyWrapSet**: signed by the group identity key,
-version monotonic; `RouteEntry.sig` must also verify against the member's key.
+version monotonic; `RouteEntry.sig` must also verify against the member's
+own key.
 
-**Presence**: signed by its owner, `seq` monotonic per node, owner must be in
-the roster. Never mutates the roster.
+**Presence**: signed by its owner, `seq` monotonic per node, owner must be
+in the roster. Never mutates the roster.
 
-**MembersResponse**: only signed artifacts are accepted (`roster`, `acl` are
-whole signed structs) — a peer can withhold but cannot fabricate.
+**MembersResponse**: only signed artifacts are accepted (`roster`, `acl`
+are whole signed structs) — a peer can withhold but cannot fabricate.
 
-**TunnelOpen** (checked by the destination — the authority for its services):
+**TunnelOpen** (checked by the destination — the authority for its
+services):
 1. envelope valid, caller in roster;
 2. caller's role has `Connect`; destination's role has `Expose`;
 3. `service` is currently declared by the destination;
@@ -240,7 +246,8 @@ whole signed structs) — a peer can withhold but cannot fabricate.
 5. per-pair tunnel id unused; open-tunnel quota not exceeded (POC: 64).
 
 **TunnelData**: known tunnel, in-window `seq`, AEAD opens with the session
-key. Anything failing any rule is dropped and logged with a reason code —
+key. Roster/ACL changes re-run checks on open tunnels; failures close them.
+Anything failing any rule is dropped and logged with a reason code —
 rejected traffic must be observable (`rmesh doctor`).
 
 ## Local storage (Veilid TableStore; keys in ProtectedStore)
@@ -248,9 +255,9 @@ rejected traffic must be observable (`rmesh doctor`).
 | Table | Contents |
 |---|---|
 | `identity` | node keypair, dh keypair |
-| `groups` | per group: header, roster, ACL, route book, group keys (current + previous epoch), nonce table (admin) |
-| `presence:<group>` | last seen presence per member (for liveness/timeout) |
-| `forwards` | configured `expose` and `forward` entries (restored on restart) |
+| `groups` | per group: header, roster, ACL, route book, group keys (current + previous epoch), group secret key if admin, nonce table (admin) |
+| `presence:<group>` | last seen presence per member (liveness/timeout) |
+| `forwards` | configured `expose` / `forward` entries (restored on restart) |
 | `audit:<group>` | membership changes + rejected-traffic log (ring buffer) |
 
 ## Size budget
