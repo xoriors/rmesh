@@ -57,6 +57,16 @@ the above make:
 4. **Per-service, per-role ACLs enforced by every node.** Named services and
    role/service rules checked at the destination on every connection —
    application-level policy, not host firewall rules.
+5. **Transport privacy (Veilid private routes).** Every surveyed project
+   exposes who-talks-to-whom to relays and observers; rmesh's POC transport
+   hides the traffic graph itself, not just the content.
+
+The review also recommended building directly on iroh (its old "no DHT"
+gap is closed by pkarr/mainline discovery). **Outcome (amendment 6″ in
+`00-brainstorm-decisions.md`): the POC stays on Veilid** — differentiator
+#5 depends on it, and the batteries-included DHT/RPC remain the fastest
+validation path — with iroh + mainline DHT kept as the recorded migration
+option behind the transport adapter.
 
 The honest corollaries, also recorded: if rmesh's goal were impact on the
 general mesh-VPN problem, contributing differentiators 1–3 to Rayfish would

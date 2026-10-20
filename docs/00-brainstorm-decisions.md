@@ -74,9 +74,10 @@ discovery (pkarr signed records, opt-in `discovery-pkarr-dht`) plus
 
 | # | Revision | Rationale |
 |---|---|---|
-| 6′ | **Supersedes #6/#7: build directly on iroh — no Veilid POC.** | The Veilid-first rationale ("iroh has no DHT, more to wire up") is stale: iroh ships pkarr/mainline-DHT discovery and gossip. A Veilid POC behind an adapter would be throwaway work; Veilid's ecosystem is smaller. Native QUIC streams also collapse the tunnel shim. |
-| 11 | **Positioning: the container-native, privacy-first variant** — not a general mesh VPN. | The generic pitch is taken (Rayfish is far ahead on it). rmesh's wedge is four choices Rayfish doesn't make: (a) admins as roles in per-member signed data, not a shared network secret key; (b) *encrypted* group state — roster invisible to DHT nodes, key rotation on membership change; (c) unprivileged port-forward mode — no TUN, no root: containers, CI runners, shared hosts; (d) per-service, per-role ACLs verified on every node, not host firewall rules. |
-| 12 | **Unprivileged `rmesh forward` demo is the proof point** and stays the POC exit criterion. | It's the fastest demonstration of wedge (c) and needs no sudo anywhere. |
+| 6″ | **#6/#7 stand: the POC stays on Veilid; iroh + mainline DHT remains the planned migration option** (owner's decision, 2026-10, reaffirmed after the review). | The review recommended building directly on iroh, since its old "no DHT" gap is closed (pkarr/mainline-DHT discovery, `iroh-gossip`) and Rayfish proves the stack. Reasons to keep the Veilid POC anyway: batteries-included DHT records/watches/RPC still make it the fastest path to validating the group/ACL/sync model; Veilid **private routing** gives transport privacy none of the surveyed projects have (a fifth differentiator); and mobile-first support keeps decision #9's later-mobile door open. iroh's matured discovery stack makes the *migration* cheaper than planned — it doesn't make the POC throwaway, because everything above the `Transport` adapter carries over. |
+| 11 | **Positioning: the container-native, privacy-first variant** — not a general mesh VPN. | The generic pitch is taken (Rayfish is far ahead on it). rmesh's wedge is choices Rayfish doesn't make: (a) admins as roles in per-member signed data, not a shared network secret key; (b) *encrypted* group state — roster invisible to DHT nodes, key rotation on membership change; (c) unprivileged port-forward mode — no TUN, no root: containers, CI runners, shared hosts; (d) per-service, per-role ACLs verified on every node, not host firewall rules; (e) transport privacy via Veilid private routes — who-talks-to-whom is hidden, not just content. |
+| 12 | **Unprivileged `rmesh forward` demo is the proof point** and a POC exit criterion. | It's the fastest demonstration of wedge (c) and needs no sudo anywhere. |
 
-Decision #4 (explicit sync for the POC) stands; `iroh-gossip` makes the
-post-POC gossip upgrade cheaper than planned. Decisions #1–#5, #8–#10 stand.
+Decision #4 (explicit sync for the POC) stands; `iroh-gossip` would make the
+post-POC gossip upgrade cheaper if the migration happens. Decisions #1–#5,
+#8–#10 stand unchanged.
