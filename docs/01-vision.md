@@ -129,6 +129,50 @@ transport privacy that a single shared secret over a single relay cannot
 give. (See `06-landscape.md` for where gsocket sits among the mesh-VPN
 projects.)
 
+### stunnel, and "a Rust stunnel over QUIC"
+
+**[stunnel](https://www.stunnel.org/)** is the other classic in this space:
+a TLS wrapper that puts an unmodified TCP client or server behind TLS
+(OpenSSL; certificate or PSK auth; client and server modes). It is the
+ancestor of rmesh's data-plane shape — *local port in, encrypted hop,
+remote port out, no app changes* — but it solves only the encryption half.
+The server side must be reachable on a public address and port, peers are
+named by host:port, and trust is per-tunnel certificates or keys with no
+notion of groups, membership, or policy.
+
+A recurring suggestion is "someone should build stunnel in Rust, with TLS
+and QUIC, as a better gsocket." That tool largely exists already:
+**[dumbpipe](https://github.com/n0-computer/dumbpipe)** (n0, MIT/Apache)
+is gsocket rebuilt on iroh — QUIC with TLS 1.3, hole punching with relay
+fallback, peers addressed by key and connected by a pasted *ticket*, and
+`listen-tcp`/`connect-tcp` port forwarding. It is two-party and
+group-less by design, which is the right shape for a pipe and the wrong one
+for a fleet.
+
+rmesh's position: **rmesh's port-forward mode is that Rust
+stunnel-over-QUIC, plus everything a single pipe lacks** — membership,
+per-service ACLs, revocation, and (on Veilid) route privacy. On the iroh
+transport the tunnel is literally a QUIC stream (`02-architecture.md`).
+What rmesh takes from stunnel and the pipe tools:
+
+- **Zero app changes stays non-negotiable.** stunnel's whole value is that
+  `psql` and `redis-cli` do not know it is there; `rmesh forward` must keep
+  that property for every TCP service.
+- **A one-shot pipe should feel as cheap as dumbpipe.** Sugar over an
+  ephemeral two-member group (`rmesh pipe` mints the group and invite in one
+  step, tears it down on exit) gives the gsocket/dumbpipe experience without
+  a second code path, and is a natural on-ramp to real groups.
+- **An optional TLS ingress, not a default.** stunnel's server mode — a
+  standard TLS endpoint that ordinary clients can reach — is the one thing
+  rmesh deliberately does not do by default (no public exposure). A
+  post-POC *edge* role could terminate standard TLS (rustls, SNI-routed to
+  exposed services) for clients that cannot run a daemon, with the edge
+  node itself a group member subject to ACLs. Opt-in, per-service, and
+  clearly marked as the point where public reachability is chosen.
+- **Not taken:** host:port addressing and certificate-per-tunnel trust;
+  rmesh names services and members, and trust comes from signed group
+  state.
+
 ## Transport strategy: Veilid now, Iroh option later
 
 Building DHTs, NAT traversal, relays, and private routing from scratch is
