@@ -42,8 +42,8 @@ container-native, privacy-first variant:
 | [02 — Architecture](docs/02-architecture.md) | Layer model, components, daemon/CLI shape, crate layout, trust model |
 | [03 — POC Spec](docs/03-poc-spec.md) | Data schemas: DHT records, invites, envelopes, tunnels, validation rules |
 | [04 — Protocols](docs/04-protocols.md) | Flows: create, invite/join, explicit sync, tunnels, revoke, routes |
-| [05 — Roadmap](docs/05-roadmap.md) | Phases 0–5 to a demoable POC; post-POC: gossip, Iroh option, quorum, TUN |
-| [06 — Landscape](docs/06-landscape.md) | Rayfish, MeshGuard, et al. — and the wedge rmesh occupies |
+| [05 — Roadmap](docs/05-roadmap.md) | Phases 0–5 to a demoable POC; post-POC: gossip, Iroh option, quorum, TUN, `rmesh pipe`, TLS edge |
+| [06 — Landscape](docs/06-landscape.md) | Rayfish, MeshGuard, gsocket, stunnel, dumbpipe, et al. — and the wedge rmesh occupies |
 
 ## The POC in one paragraph
 

@@ -33,6 +33,8 @@ trust" pitch, shipping today:
 | iroh-lan, wgmesh | Rust | LAN-style meshes over iroh/WireGuard | shared secret, no membership lifecycle |
 | Tinc, Nebula, Yggdrasil | C/Go | older generation | manual config or CA-centric; no DHT-era UX |
 | gsocket (GSRN) | C | connect-by-shared-secret through one relay network; SRP E2EE, zero inbound ports | single relay operator; two-party trust model; relay/observer sees the traffic graph; no groups, ACLs, or membership lifecycle |
+| dumbpipe | Rust, iroh | two-party QUIC pipe connected by a pasted ticket; TCP/Unix port forwarding; hole punching + relay fallback | the "Rust gsocket over QUIC" — but two-party only: no groups, ACLs, revocation, or route privacy |
+| stunnel | C, OpenSSL | TLS wrapper for unmodified TCP clients/servers; cert or PSK auth | encryption only: server must be publicly reachable, host:port addressing, no NAT traversal, no membership or policy |
 
 **gsocket** is not a mesh VPN — it is the closest thing to rmesh's
 *ergonomics* goal from a different corner: reach a peer by proving you hold
@@ -43,6 +45,14 @@ secret-as-address, outbound-only, relay-blind-to-content properties are
 exactly what rmesh's invite/join path and no-root data plane aim for, while
 its centralized relay, two-party shared-secret trust, and traffic-analysis
 visibility are precisely rmesh's differentiators #1, #2, and #5.
+
+**stunnel and dumbpipe** bracket rmesh's data plane from below. stunnel is
+the original "wrap a TCP service, no app changes" tool, minus reachability;
+dumbpipe is the "Rust stunnel/gsocket over QUIC" people keep asking for,
+minus groups. rmesh's `forward` is the same pipe with membership and
+policy on top; the two ideas it borrows (a one-shot `rmesh pipe`, and an
+opt-in stunnel-style TLS edge) are recorded as post-POC directions 9 and 10
+in `05-roadmap.md`.
 
 ## What this means for rmesh
 

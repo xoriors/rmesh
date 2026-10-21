@@ -146,6 +146,14 @@ Recorded so POC decisions don't paint us out of them; unscheduled.
    is mobile-first — a reason it keeps its seat).
 8. **UDP forwarding**, large-transfer optimization, self-hosted bootstrap
    for air-gapped deployments.
+9. **`rmesh pipe`** — a one-shot, dumbpipe/gsocket-style tunnel: mint an
+   ephemeral two-member group plus invite in one command, tear it down on
+   exit. Pure sugar over groups and `forward`; no second data path.
+10. **TLS edge (ingress) role** — opt-in, stunnel-server-style: a member
+    terminates standard TLS (rustls, SNI-routed) for clients that cannot run
+    the daemon and forwards into exposed services under the same ACLs. The
+    only feature that deliberately creates public reachability, so it is
+    per-service and off by default.
 
 ## Open questions (to settle during Phases 0–2)
 
