@@ -32,6 +32,17 @@ trust" pitch, shipping today:
 | EdgeVPN | Go, libp2p | shared-secret networks | no invitations, no ACLs |
 | iroh-lan, wgmesh | Rust | LAN-style meshes over iroh/WireGuard | shared secret, no membership lifecycle |
 | Tinc, Nebula, Yggdrasil | C/Go | older generation | manual config or CA-centric; no DHT-era UX |
+| gsocket (GSRN) | C | connect-by-shared-secret through one relay network; SRP E2EE, zero inbound ports | single relay operator; two-party trust model; relay/observer sees the traffic graph; no groups, ACLs, or membership lifecycle |
+
+**gsocket** is not a mesh VPN — it is the closest thing to rmesh's
+*ergonomics* goal from a different corner: reach a peer by proving you hold
+a secret, with no address and no open port, through the Global Socket Relay
+Network. It is worth tracking as both inspiration and foil (see the
+"Inspiration: gsocket's secret-as-address" section in `01-vision.md`): its
+secret-as-address, outbound-only, relay-blind-to-content properties are
+exactly what rmesh's invite/join path and no-root data plane aim for, while
+its centralized relay, two-party shared-secret trust, and traffic-analysis
+visibility are precisely rmesh's differentiators #1, #2, and #5.
 
 ## What this means for rmesh
 

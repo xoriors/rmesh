@@ -68,6 +68,67 @@ psql ──▶ localhost:8443 (rmesh daemon, machine A)
          rmesh daemon (machine B) ──▶ localhost:5432 (postgres)
 ```
 
+## Inspiration: gsocket's secret-as-address
+
+A useful reference point from outside the mesh-VPN world is
+**[gsocket](https://github.com/hackerschoice/gsocket)** (Global Socket, by
+The Hacker's Choice). gsocket connects two programs that share a secret —
+regardless of NAT, firewall, or geography — by routing them through the
+**Global Socket Relay Network (GSRN)**. There is no IP address to know and
+no inbound port to open: each side derives a session ID from the shared
+secret, both make *outbound* connections to the relay, and the relay pairs
+them. The secret never leaves the host; key exchange is SRP (RFC 5054) with
+a fresh ephemeral AES-256 session key and perfect forward secrecy, so the
+relay only ever sees ciphertext and never needs a PKI. On top of this sit
+simple tools — `gs-netcat` (a netcat/ssh-style pipe and shell),
+`gs-sftp`/`gs-mount` (file transfer and remote mounts), and `gsocket`
+itself, which makes an existing service behind NAT reachable by connecting
+to a `*.gsocket` hostname.
+
+Three of gsocket's ideas map directly onto what rmesh already wants to be,
+and are worth stating as explicit design pressure:
+
+1. **The credential *is* the address.** You reach a peer by proving you
+   hold a secret, not by knowing where it is. rmesh's invitation tokens are
+   already this shape — a redeemed invite is the rendezvous credential that
+   bootstraps the first contact — and the parallel is worth keeping in mind
+   as the invite/join path is designed: a single pasted token should be
+   enough to find and authenticate a peer, with no address, port, or
+   discovery configuration from the user.
+2. **Zero inbound exposure, outbound-only.** gsocket needs no open ports and
+   no privileged network setup to make a service behind NAT reachable. This
+   is the same promise as rmesh's no-root/no-TUN data plane (choice #3) —
+   gsocket is independent evidence that "reachable from anywhere without
+   opening a port or touching the host's network" is a real, shippable
+   property, and rmesh should hold itself to it.
+3. **Relay for transport, blind to content.** The GSRN carries bytes it
+   cannot read. rmesh treats the DHT and relays the same way — trusted for
+   availability only (principle #3) — and goes further by encrypting *group
+   state*, not just the transport.
+
+And gsocket's **limitations are precisely where rmesh's differentiators
+live** — it is as useful as a foil as it is as an inspiration:
+
+- **A single relay operator.** The GSRN is one volunteer-run service, not a
+  decentralized plane. rmesh's control plane is the DHT plus signed,
+  member-validated state — no operator in the middle.
+- **Traffic analysis.** gsocket concedes that an observer (and the relay)
+  can see *that* two parties are talking, even if not what they say.
+  rmesh's Veilid private routes hide the who-talks-to-whom graph itself
+  (choice #5) — the single biggest thing gsocket does not attempt.
+- **Shared-secret trust.** When more than two parties share a gsocket
+  secret, any of them can take the listener slot and impersonate a peer;
+  the model assumes members "play nicely." rmesh replaces the shared secret
+  with per-admin signed identity and encrypted, rotating group keys (choices
+  #1 and #2) — accountability and revocation instead of mutual trust.
+
+Net: gsocket is the clean, two-party, relay-centric version of "connect by
+secret, not by address." rmesh keeps that ergonomics goal — a token is all
+you need — while adding the group lifecycle, decentralized authority, and
+transport privacy that a single shared secret over a single relay cannot
+give. (See `06-landscape.md` for where gsocket sits among the mesh-VPN
+projects.)
+
 ## Transport strategy: Veilid now, Iroh option later
 
 Building DHTs, NAT traversal, relays, and private routing from scratch is
